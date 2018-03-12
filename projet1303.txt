@@ -1,0 +1,672 @@
+#include <time.h>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <windows.h>
+
+//#include <SDL.h>
+
+#define RANDOM(probA, a, b) (rand()%probA == 0 ? a : b)
+
+#define SPACING 7 //must be odd;
+
+#define ROUNDS 10
+#define INVINCIBILITY 5 //# of turns of invincibility;
+#define PLAYERS 30 //# of players;
+
+#define SIZE_CENTER 2 //number of walls around the bonus in every direction
+
+#define ITEM_SLOTS 2
+#define PLAYER_INFO_SLOTS 7 //Pos X [0], Y [1], Item 1 [2], Item 2 [3], Score [4], State Speed [5], State Bonus [6];
+#define INFO_SLOTS 2 //# of players alive, Turn;
+
+#define TurnLimit 50 //For "Limite de tours" victory;
+#define ScoreLimit 100 //For "Limite de score" victory;
+
+#define PROB_GOLD_WALL 6
+#define PROB_BONUS_8 6
+#define PROB_ITEM 5 //Probabilty (1/PROB) for a tile to be an item; must be >1;
+#define PROB_SPEC 2 //Probability for an item to be "defensive"; The probability of an item being "aggresive" is thus 1-(1/PROB_SPECIAL); must be >1;
+
+#define PROB_PICK 5
+#define PROB_PICK2 10
+#define PROB_PASS 5
+#define PROB_TELE 5
+
+#define PROB_SPEED 5
+#define PROB_PROJ1 10
+#define PROB_PROJ 5
+#define PROB_BOMB 5
+
+#define CODE_BEFORE_ITEM 8 //Last wall ID //ID for the map and inventory; CODE_ITEM (9): passe-muraille, CODE_ITEM+1, ...+2, ...+3 (10, 11, 12): pioche (durabilite), ...+4, ...+5, ...+6 (13, 14, 15): projectile, ...+7 (16): bombe, ...+8, ...+9, ...+ITEMS-1 (17, 18, 19): speed;
+#define SPEC_ITEMS 6
+#define ITEMS 11 //# of items ->
+#define BONUS_SCORE_FULL_ITEMS 2
+
+#define PROJ_WALL_DMG 3
+#define BOMB_WALL_DMG 2
+#define PROJ_DMG 15
+#define BOMB_DMG 15
+
+#define CODE_SPEED_STATE -2 // = -BONUS_TURNS_SPEED
+#define CODE_ATTACK_STATE 10 //ID for the attack bonus
+#define CODE_DEAD_STATE 99 //
+
+#define SCORE_KILL 10
+#define SCORE_HIT 3
+#define SCORE_BREAK 2
+
+#define SCORE_LOSS 3
+
+int CODE_PLAYER = CODE_BEFORE_ITEM+4; //ID for the map; A player ID is CODE_PLAYER + Player#;
+
+int size[2];
+int dir[4][2] = {{0,1},{1,0},{0,-1},{-1,0}};
+int** maze;
+int* score;
+
+void mazeGenerator();
+
+void SetColor();
+
+void afficherMaze();
+
+void shuffle(int* tab);
+
+void recursion(int x, int y);
+
+void Round(int mode, int round);
+
+void Tour(int** parameters);
+
+int main() {
+    time_t t;
+    int i, best=0, player=0;
+    srand((unsigned) time(&t));
+    score = malloc(PLAYERS*sizeof(int));
+    for(i=1; i<=ROUNDS; i++) {
+        Round(0, i);
+    }
+    printf("\n\n\nXXXX GAME %i Final Scores XXXX\n\n\n", i);
+    for(i=0; i<PLAYERS; i++) {
+        printf("Player %i Score : %i\n", i, score[i]);
+        if(score[i]>best) {
+            best = score[i];
+            player = i;
+        }
+    } printf("\nBest AI : %i, Score : %i\n", player, best);
+    system("pause");
+    return(0);
+}
+/*
+
+    int junctions[100][2];
+    int junctionDir[100][4];
+    int junction = 0;
+    int r;
+    int locD;
+    int x=0;
+    int y=0;
+    while(1==1) {
+        maze[x][y] = 1;
+        r = rand() % 5;
+        if(r==4) {
+            locD = D;
+            D = rand();
+            if(locD == D) {
+                D = (D+1) % 4;
+            cfD[cf] = {}
+            }
+*/
+void mazeGenerator() { //0 -> (0,1), 1 -> (1,0), 2 -> (0,-1), 3 -> (-1,0)
+    int i,j;
+    maze = malloc(size[0]*sizeof(int*));
+    for(i=0;i<size[0];i++) {
+        maze[i] = malloc(size[1]*sizeof(int));
+        for(j=0;j<size[1];j++) {
+            maze[i][j] = 0;
+        }
+    }
+
+    recursion(0, 0);
+
+    for(i=size[0]/2-SIZE_CENTER; i<=size[0]/2+SIZE_CENTER; i++) {
+        for(j=size[1]/2-SIZE_CENTER; j<=size[1]/2+SIZE_CENTER; j++) {
+            maze[i][j] = RANDOM(PROB_GOLD_WALL, 7, 3);
+        }
+    }
+
+    maze[size[0]/2][size[1]/2] = CODE_BEFORE_ITEM+3;
+
+    for(i=0;i<size[0];i++) {
+        for(j=0;j<size[1];j++) {
+            if(maze[i][j] == 0) {
+                if(RANDOM(PROB_ITEM, 1, 0)) {
+                    maze[i][j] = RANDOM(PROB_SPEC, CODE_BEFORE_ITEM+1, CODE_BEFORE_ITEM+2);
+                }
+                else if(RANDOM(2, 1, 0)) {
+                    maze[i][j]=RANDOM(PROB_BONUS_8, 8, 4);
+                }
+            }
+        }
+    }
+}
+
+void recursion(int x, int y) {
+    int i;
+    int direction[4] = {0,1,2,3};
+    shuffle(direction);
+    for(i=0; i<3; i++) {
+        //printf("%d %d\n", i, dir[i]);
+        if(x+2*(dir[direction[i]][0])>=size[0] || x+2*(dir[direction[i]][0])<0 || y+2*(dir[direction[i]][1])>=size[1] || y+2*(dir[direction[i]][1])<0 || maze[x+2*(dir[direction[i]][0])][y+2*(dir[direction[i]][1])]) {
+            continue;
+        }
+        else {
+            maze[x+dir[direction[i]][0]][y+dir[direction[i]][1]] = RANDOM(PROB_GOLD_WALL, 7, 3);
+            maze[x+2*dir[direction[i]][0]][y+2*dir[direction[i]][1]] = RANDOM(PROB_GOLD_WALL, 7, 3);
+            recursion(x+2*dir[direction[i]][0], y+2*dir[direction[i]][1]);
+        }
+    }
+}
+
+void shuffle(int* tab) {
+        int i;
+        for (i = 0; i < 3; i++){
+          int j = i + rand() / (RAND_MAX / (4 - i) + 1);
+          int t = tab[j];
+          tab[j] = tab[i];
+          tab[i] = t;
+        }
+}
+
+void afficherMazeN() {
+    int i,j;
+    for(j = 0; j < size[1]; j++) {
+       printf("\n");
+       for(i = 0; i < size[0]; i++) {
+            printf("%i ", maze[i][j]);
+       }
+    }
+}
+
+void afficherMaze() {
+    SetColor(255);
+    int i,j,value;
+    for(j = 0; j < size[1]; j++) {
+       printf("\n");
+       for(i = 0; i < size[0]; i++) {
+            value = maze[i][j];
+            if(value == 3 || value == 2 || value == 1) {
+                printf("X ");
+            }
+            else if(value == 7 || value == 6 || value == 5) {
+                SetColor(30);
+                printf("X ");
+                SetColor(255);
+            }
+            else if(value == 4) {
+                SetColor(55);
+                printf("+ ");
+                SetColor(255);
+            }
+            else if(value == 8) {
+                SetColor(42);
+                printf("+ ");
+                SetColor(255);
+            }
+            else if(value == CODE_BEFORE_ITEM+3) {
+                SetColor(30);
+                printf("B ");
+                SetColor(255);
+            }
+            else if(value >= CODE_PLAYER) {
+                SetColor(42);
+                printf("O ");
+                SetColor(255);
+            }
+            else if(value == CODE_BEFORE_ITEM+1) {
+                SetColor(44);
+                printf("S ");
+                SetColor(255);
+            }
+            else if(value == CODE_BEFORE_ITEM+2) {
+                SetColor(30);
+                printf("D ");
+                SetColor(255);
+            }
+            /*else if(maze[i][j] >= 30){
+               printf("%i", maze[i][j]);
+            }*/
+            else {
+               printf("  ");
+            }
+        }
+    }
+}
+
+int notActionCondition(int action, int* parameter, int turn, int x, int y, int d) { //Teste les conditions pour les actions (ex. pas de mur pour l'action avancer)
+    /*if(parameter[2] != 0) {
+        printf("ITEM 1 ");
+    }*/
+    if((x<0 || x>=size[0] || y<0 || y>=size[1]) || ((action==0 && (maze[x][y] <= 7 && maze[x][y]%4 != 0)) || (action==1 && (((maze[x][y] < CODE_BEFORE_ITEM && maze[x][y]%4 == 0) || (maze[x][y] > CODE_BEFORE_ITEM && maze[x][y] < CODE_PLAYER)) || (maze[x][y] >= CODE_PLAYER && (turn<=INVINCIBILITY)))) || ((action==2 || action==3)  && (parameter[action]==0 || ((parameter[action]>=CODE_BEFORE_ITEM+2 && parameter[action]<=CODE_BEFORE_ITEM+4) && (maze[x][y]>7 || maze[x][y]%4==0)) || (parameter[action]==CODE_BEFORE_ITEM+1 && ((x+dir[d][0]<0 || x+dir[d][0]>=size[0] || y+dir[d][1]<0 || y+dir[d][1]>size[1]) || (maze[x+dir[d][0]][y+dir[d][1]]<CODE_BEFORE_ITEM && maze[x+dir[d][0]][y+dir[d][1]]%4!=0))))) || ((action==4 || action==5) && parameter[action+1]==0))) {
+        /*if(parameter[2] != 0) {
+            printf("ITEM 2 ");
+        }**/
+        return 1;
+    }
+    else {
+        return 0;
+    }
+}
+
+int* AI(int ai, int** parameters) {
+    int** Options;
+    int k,i,j;
+    switch(ai) {
+        /*case 10:
+            printf("L");
+            return(test);
+            break;
+        case 11:
+            printf("D");
+            return(test);
+            break;*/
+        default:
+            Options = malloc(20*sizeof(int*));
+            k = 0;
+            for(i=0;i<5;i++) {
+                for(j=0;j<4;j++) {
+                    if(!(notActionCondition(i, parameters[ai], parameters[PLAYERS][1], parameters[ai][0]+dir[j][0], parameters[ai][1]+dir[j][1], j))) {
+                        Options[k] = malloc(2*sizeof(int));
+                        Options[k][0] = i;
+                        Options[k][1] = j;
+                        k++;
+                    }
+                }
+            }
+
+            /*for(i=0; i<k; i++) {
+                printf("P%i [%i, %i] ", ai, Options[i][0], Options[i][1]);
+            }*/
+            printf("\n");
+
+            return(Options[rand()%k]);
+    }
+}
+
+int* GetAction(int i, int** parameters) {
+    int* action;
+    int trials=0;
+    do{ printf("PLAYER %i ", i);
+        action = AI(i, parameters);
+        trials++;
+        if(trials>50) {
+            break;
+        }
+    } while(notActionCondition(action[0], parameters[i], parameters[PLAYERS][1], parameters[i][0]+dir[action[1]][0], parameters[i][1]+dir[action[1]][1], action[1]));
+    return(action);
+}
+
+void Damage(int dmg, int i, int** parameters, int combat, int player) {
+    int def = parameters[i][4]+parameters[i][6];
+    if(def-dmg<=0) {
+        if(combat) {
+            parameters[player][4]-=def/SCORE_LOSS;
+            maze[parameters[i][0]][parameters[i][1]]=player+CODE_PLAYER;
+            parameters[player][0] = parameters[i][0];
+            parameters[player][1] = parameters[i][1];
+        }
+        else {
+            maze[parameters[i][0]][parameters[i][1]]=0;
+        }
+        def-=dmg/SCORE_LOSS;
+        if(def<parameters[i][4]) {
+            parameters[i][4]=def;
+        }
+        parameters[i][5]=99;
+        parameters[PLAYERS][0]--;
+        parameters[player][4]+=SCORE_KILL;
+        parameters[player][6]=parameters[i][6];
+    }
+    else if(combat) {
+        int score = parameters[player][4];
+        parameters[player][4]-=parameters[i][4]/SCORE_LOSS;
+        parameters[i][4]-=score/SCORE_LOSS;
+        parameters[player][5]=99;
+        parameters[PLAYERS][0]--;
+        parameters[i][4]+=SCORE_KILL;
+        parameters[i][6]=parameters[player][6];
+        //printf("%i %i %i %i", i+CODE_PLAYER, player+CODE_PLAYER, maze[parameters[i][0]][parameters[i][1]], );
+        maze[parameters[player][0]][parameters[player][1]]=0;
+    }
+    else {
+        def-=dmg;
+        if(def<parameters[i][4]) {
+            parameters[i][4]=def;
+        }
+        parameters[player][4]+=SCORE_HIT;
+    }
+}
+
+void Projectile(int pos[2], int** parameters, int i, int value, int dmg, int walldmg) {
+    if(value>=CODE_PLAYER) {
+        Damage(dmg, value-CODE_PLAYER, parameters, 0, i);
+    }
+    else if(value<CODE_BEFORE_ITEM && value%4!=0) {
+        if(value-walldmg<=0) {
+            maze[pos[0]][pos[1]]=0;
+        }
+        else {
+            maze[pos[0]][pos[1]]=value-walldmg;
+        }
+    }
+    else {
+        maze[pos[0]][pos[1]]=0;
+    }
+}
+
+void Bomb(int pos[2], int** parameters, int player) { //TODO
+    int i, j;
+    for(i = pos[0] - 1; i <= pos[0] + 1; i++) {
+        for(j = pos[1] - 1; j <= pos[1] + 1; j++) {
+            if(i>=0 && i<size[0] && j>=0 && j<size[1]) {
+                int pos[2] = {i,j};
+                printf("Bomb (%i %i) ", i, j);
+                Projectile(pos, parameters, player, maze[i][j], BOMB_DMG, BOMB_WALL_DMG);
+            }
+        }
+    }
+}
+int* Throw(int nextPos[2], int value, int direction, int bomb) { //TODO
+    while(1) {
+        if(value!=0 || (nextPos[0]+dir[direction][0]<0 || nextPos[0]+dir[direction][0]>=size[0] || nextPos[1]+dir[direction][1]<0 || nextPos[1]+dir[direction][1]>=size[1])) {
+            //printf("%i %i %i %i", value, bomb, nextPos[0])
+            if(value<CODE_BEFORE_ITEM && value%4 != 0 && bomb) {
+                nextPos[0]-=dir[direction][0];
+                nextPos[1]-=dir[direction][1];
+            }
+            return(nextPos);
+        }
+        nextPos[0]+=dir[direction][0];
+        nextPos[1]+=dir[direction][1];
+        value=maze[nextPos[0]][nextPos[1]];
+    }
+}
+
+void Movement(int x, int y, int** parameters, int dir, int i) { //TODO
+    int value = maze[x][y];
+    if(value<CODE_BEFORE_ITEM + 1) {
+        parameters[i][4]+=value+1;
+    }
+    else if(value>=CODE_BEFORE_ITEM + 1) {
+        if(value>=CODE_PLAYER) {
+            Damage(parameters[i][2], value-CODE_PLAYER, parameters, 1, i);
+        }
+        else if(value==CODE_BEFORE_ITEM+3) {
+            parameters[i][6] = CODE_ATTACK_STATE;
+        }
+        else {
+            int slot = !(parameters[i][2]) ? 2 : (!(parameters[i][3]) ? 3 : 0);
+            printf("PLAYER : %i, SLOT : %i, VALUE : %i\n", i, slot, value);
+            if(slot) {
+                if(value==CODE_BEFORE_ITEM+1) {
+                    if(RANDOM(2, 1, 0)) {
+                        if(RANDOM(4, 1, 0)) {
+                            parameters[i][slot] = CODE_BEFORE_ITEM+2; //teleporteur
+                        }
+                        else {
+                            if(RANDOM(2, 1, 0)) {
+                                parameters[i][slot] = CODE_BEFORE_ITEM+1; //passe-mur
+                            }
+                            else {
+                                parameters[i][slot] = CODE_BEFORE_ITEM+5; //pioche
+                            }
+                        }
+                    }
+                    else {
+                        if(RANDOM(3, 1, 0)) {
+                            parameters[i][slot] = CODE_BEFORE_ITEM+4; //pioche
+                        }
+                        else {
+                            parameters[i][slot] = CODE_BEFORE_ITEM+3; //pioche
+                        }
+                    }
+                }
+                else if(value==CODE_BEFORE_ITEM+2) {
+                    if(parameters[i][slot]==0) {
+                        if(RANDOM(2, 1, 0)) {
+                            if(RANDOM(4, 1, 0)) {
+                                parameters[i][slot] = CODE_BEFORE_ITEM+SPEC_ITEMS;
+                            }
+                            else {
+                                if(RANDOM(2, 1, 0)) {
+                                    parameters[i][slot] = CODE_BEFORE_ITEM+SPEC_ITEMS+2;
+                                }
+                                else {
+                                    parameters[i][slot] = CODE_BEFORE_ITEM+SPEC_ITEMS+3;
+                                }
+                            }
+                        }
+                        else {
+                            if(RANDOM(3, 1, 0)) {
+                                parameters[i][slot] = CODE_BEFORE_ITEM+SPEC_ITEMS+5;
+                            }
+                            else {
+                                parameters[i][slot] = CODE_BEFORE_ITEM+SPEC_ITEMS+6;
+                            }
+                        }
+                    }
+                }
+            }
+            else {
+                parameters[i][4]+=BONUS_SCORE_FULL_ITEMS;
+            }
+        }
+    }
+
+    maze[x][y]=CODE_PLAYER+i;
+    maze[parameters[i][0]][parameters[i][1]] = 0;
+    parameters[i][0]=x;
+    parameters[i][1]=y;
+}
+
+void Tour(int** parameters) {
+    int i, nextPos[2], item, value;
+    int* action;
+    for(i=0;i<PLAYERS;i++) {
+        if(parameters[i][5] != CODE_DEAD_STATE) {
+            action = GetAction(i, parameters);
+            nextPos[0] = parameters[i][0]+dir[action[1]][0];
+            nextPos[1] = parameters[i][1]+dir[action[1]][1];
+            printf("P%i [%i, %i] -> (%i,%i) \n", i, action[0], action[1], nextPos[0], nextPos[1]);
+            value = maze[nextPos[0]][nextPos[1]];
+            if(action[0]==0) { //Action 0 -> deplacement
+                Movement(nextPos[0], nextPos[1], parameters, action[1], i);
+            }
+            else if(action[0]==1) { //Action 1 -> casser mur
+                maze[nextPos[0]][nextPos[1]]=value-1;
+            }
+            else if(action[0]==2 || action[0]==3) { //Action 2 -> utiliser item 1, Action 3 -> utiliser item 2
+                item = parameters[i][action[0]];
+
+                if(item==CODE_BEFORE_ITEM + 1) { //(9) Passe-mur
+                    Movement(nextPos[0]+dir[action[1]][0], nextPos[1]+dir[action[1]][1], parameters, action[1], i);
+                }
+                else if(item>=CODE_BEFORE_ITEM+2 && item<=CODE_BEFORE_ITEM+4) { //(10, 11, 12) Pioche
+                    maze[nextPos[0]][nextPos[1]]=4*(value>4);
+                }
+                else if(item==CODE_BEFORE_ITEM+5) { //(13) Tele
+                    maze[parameters[i][0]][parameters[i][1]] = 0;
+                    do{ nextPos[0] = rand()%size[0];
+                        nextPos[1] = rand()%size[1];
+                    } while(maze[nextPos[0]][nextPos[1]] >= CODE_PLAYER);
+                    parameters[i][0] = nextPos[0];
+                    parameters[i][1] = nextPos[1];
+                    maze[nextPos[0]][nextPos[1]]=CODE_PLAYER+i;
+                }
+                else if(item>=CODE_BEFORE_ITEM+SPEC_ITEMS && item<=CODE_BEFORE_ITEM+SPEC_ITEMS+2) { //(14, 15, 16) Proj
+                    Projectile(Throw(nextPos, value, action[1], 0), parameters, i, value, PROJ_DMG, PROJ_WALL_DMG);
+                }
+                else if(item==CODE_BEFORE_ITEM+SPEC_ITEMS+3) { //(17) Bomb
+                    Bomb(Throw(nextPos, value, action[1], 1), parameters, i);
+                }
+                else if(item>=CODE_BEFORE_ITEM+SPEC_ITEMS+4 && item<=CODE_BEFORE_ITEM+SPEC_ITEMS+6 && parameters[i][5]>=0) { //(18, 19, 20) Speed
+                    parameters[i][5] = CODE_SPEED_STATE;
+                }
+
+                if(item==CODE_BEFORE_ITEM+SPEC_ITEMS+5 || item==CODE_BEFORE_ITEM+SPEC_ITEMS+6 || item==CODE_BEFORE_ITEM+SPEC_ITEMS+1 || item==CODE_BEFORE_ITEM+SPEC_ITEMS+2) {
+                    parameters[i][action[0]]--;
+                }
+                else {
+                    parameters[i][action[0]] = 0;
+                }
+            }
+            else { //Action 4 -> recycler puis jeter l'item 1, Action 5 -> recycler puis jeter l'item 2
+                parameters[i][4]+=(4-(parameters[i][action[0]-1]%3));
+                parameters[i][action[0]]=0;
+            }
+
+            if(parameters[i][5]<0) { //Speed bonus
+                parameters[i][5]++;
+                i--;
+            }
+        }
+    }
+    parameters[PLAYERS][1]++;
+}
+
+void Round(int mode, int round) {
+    int i, j, go = 1;
+    int SPACING1=SPACING, SPACING2=SPACING;
+    int Side = PLAYERS/4+1;
+    int extraSide = PLAYERS%4;
+    if(extraSide!=0) {
+        size[0] = Side*(SPACING+1)+3;
+        size[1] = (Side-1+(extraSide-1)/2)*(SPACING+1)+3;
+
+        if(extraSide==1) {
+            SPACING1=(size[0]-Side)/(Side-1);
+        }
+        else if(extraSide==3) {
+            SPACING2=(size[0]-Side)/(Side-1);
+        }
+    }
+
+    else {
+        size[0] = (Side-1)*(SPACING+1)+3;
+        size[1] = (Side-1)*(SPACING+1)+3;
+    }
+
+    mazeGenerator();
+    int** parameters = malloc((PLAYERS+1)*sizeof(int*));
+
+    for(i=0; i<PLAYERS; i++) {
+        parameters[i] = malloc((PLAYER_INFO_SLOTS+ITEM_SLOTS)*sizeof(int));
+
+        for(j=2;j<PLAYER_INFO_SLOTS+ITEM_SLOTS;j++) {
+            parameters[i][j] = 0;
+        }
+
+        if(i%4==0) {
+            parameters[i][0] = (i/4)*(SPACING+1)+1;
+            parameters[i][1] = 1;
+        }
+        else if(i%4==1) {
+            parameters[i][0] = size[0]-2-(i/4)*(SPACING1+1);
+            parameters[i][1] = size[1]-2;
+        }
+        else if(i%4==2) {
+            parameters[i][0] = 1;
+            parameters[i][1] = size[1]-2-(i/4)*(SPACING+1);
+        }
+        else {
+            parameters[i][0] = size[0]-2;
+            parameters[i][1] = (i/4)*(SPACING2+1)+1;
+        }
+
+        maze[parameters[i][0]][parameters[i][1]] = i + CODE_PLAYER;
+    }
+
+    parameters[PLAYERS] = malloc(sizeof(int)*INFO_SLOTS);
+    parameters[PLAYERS][0] = PLAYERS;
+    parameters[PLAYERS][1] = 0;
+
+    if(mode==0) { //3 modes de jeu : Battle Royale, Limite de score, Limite de tours
+        while(parameters[PLAYERS][0] > 1) {
+            afficherMaze();
+            //afficherMazeN();
+            printf("\n");
+            for(i=0; i<PLAYERS; i++) {
+                printf("P%i, X:%i, Y:%i, I1: %i, I2: %i, S: %i, State: %i, Speed State: %i \n", i, parameters[i][0], parameters[i][1], parameters[i][2], parameters[i][3], parameters[i][4], parameters[i][5], parameters[i][6]);
+            }
+            printf("Turn: %i, Players Alive: %i \n", parameters[PLAYERS][1], parameters[PLAYERS][0]);
+            system("pause");
+            Tour(parameters);
+        }
+    }
+    else if(mode==1) {
+        while(go) {
+            afficherMaze();
+            //afficherMazeN();
+            printf("\n");
+            for(i=0; i<PLAYERS; i++) {
+                printf("P%i, X:%i, Y:%i, I1: %i, I2: %i, S: %i, State: %i, Bonus State: %i \n", i, parameters[i][0], parameters[i][1], parameters[i][2], parameters[i][3], parameters[i][4], parameters[i][5], parameters[i][6]);
+            }
+            printf("Turn: %i, Players Alive: %i \n", parameters[PLAYERS][1], parameters[PLAYERS][0]);
+            system("pause");
+            Tour(parameters);
+            if(parameters[PLAYERS][0] <= 1) {
+                go = 0;
+            }
+            for(i=0;i<PLAYERS;i++) {
+                if(parameters[i][4] > ScoreLimit) {
+                    go = 0;
+                }
+            }
+        }
+    }
+    else if(mode==2) {
+        while(parameters[PLAYERS][1] <= TurnLimit && parameters[PLAYERS][0] > 1) {
+            afficherMaze();
+            //afficherMazeN();
+            printf("\n");
+            for(i=0; i<PLAYERS; i++) {
+                printf("P%i, X:%i, Y:%i, I1: %i, I2: %i, S: %i, Speed State: %i, Bonus State: %i \n", i, parameters[i][0], parameters[i][1], parameters[i][2], parameters[i][3], parameters[i][4], parameters[i][5], parameters[i][6]);
+            }
+            printf("Turn: %i, Players Alive: %i \n", parameters[PLAYERS][1], parameters[PLAYERS][0]);
+            system("pause");
+            Tour(parameters);
+        }
+    }
+    else {
+        afficherMaze();
+    }
+
+    int best = 0, player = 0;
+    printf("\n\n\nXXXX ROUND %i Final Scores XXXX\n\n\n", round);
+    for(i=0; i<PLAYERS; i++) {
+        printf("Player %i Score : %i (%i)\n", i, parameters[i][4], parameters[i][5]);
+        score[i]+=parameters[i][4];
+        if(parameters[i][4]>best) {
+            best = parameters[i][4];
+            player = i;
+        }
+    } printf("\nPlayer %i won the round ! Score : %i\n", player, parameters[player][4]);
+    system("pause");
+}
+
+void SetColor(int ForgC) {
+     WORD wColor;
+
+      HANDLE hStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
+      CONSOLE_SCREEN_BUFFER_INFO csbi;
+
+                       //We use csbi for the wAttributes word.
+     if(GetConsoleScreenBufferInfo(hStdOut, &csbi))
+     {
+                 //Mask out all but the background attribute, and add in the forgournd     color
+          wColor = (csbi.wAttributes & 0xF0) + (ForgC & 0x0F);
+          SetConsoleTextAttribute(hStdOut, wColor);
+     }
+     return;
+}
